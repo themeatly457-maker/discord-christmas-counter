@@ -4,37 +4,44 @@ from discord.ext import tasks, commands
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import itertools
+from aiohttp import web   # ⚠️ necesario para /healthz
+
+# ============================
+#  SERVIDOR HEALTHZ (Render)
+# ============================
+
+async def healthcheck(request):
+    return web.Response(text="OK")
+
+app = web.Application()
+app.router.add_get("/healthz", healthcheck)
+
+async def start_health_server():
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 10001)
+    await site.start()
+    print("✔ Servidor /healthz activo en puerto 10001")
+
+# ============================
+#  BOT DE DISCORD
+# ============================
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = 1446410614246215860
+MENSAJE_ID = None
 
 BANNER_URL = "https://i.imgur.com/73E1zoy.png"
 GIF_URL = "https://i.imgur.com/Lc07RWf.gif"
 
-COLORES = [0xFF0000, 0xFF7F00, 0xFFFF00, 0x00FF00, 0x00FFFF, 0x0000FF, 0x8B00FF]
+COLORES = [0xFF0000,0xFF7F00,0xFFFF00,0x00FF00,0x00FFFF,0x0000FF,0x8B00FF]
 ciclo_colores = itertools.cycle(COLORES)
 
 TZ = ZoneInfo("America/Bogota")
-
 fecha_objetivo = datetime(2025, 12, 25, 0, 0, 0, tzinfo=TZ)
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
-
-MESSAGE_FILE = "message_id.txt"
-
-
-def guardar_id(id):
-    with open(MESSAGE_FILE, "w") as f:
-        f.write(str(id))
-
-
-def cargar_id():
-    if os.path.exists(MESSAGE_FILE):
-        with open(MESSAGE_FILE, "r") as f:
-            return int(f.read().strip())
-    return None
-
 
 def formato(delta):
     dias = delta.days
@@ -43,18 +50,18 @@ def formato(delta):
     segundos = delta.seconds % 60
     return f"{dias} días, {horas} horas, {minutos} minutos, {segundos} segundos"
 
-
 @bot.event
 async def on_ready():
     print(f"Conectado como {bot.user}")
+    bot.loop.create_task(start_health_server())  # inicia servidor /healthz
     contador.start()
-
 
 @tasks.loop(seconds=1)
 async def contador():
+    global MENSAJE_ID
     canal = bot.get_channel(CHANNEL_ID)
     if canal is None:
-        print("❌ No encuentro canal.")
+        print("❌ No encuentro el canal.")
         return
 
     ahora = datetime.now(TZ)
@@ -73,34 +80,30 @@ async def contador():
         return
 
     texto = formato(delta)
+
     embed = discord.Embed(
         title="🎅 Cuenta regresiva para Navidad",
         description=f"**Faltan:**\n```{texto}```",
         color=color_actual
     )
+
     embed.set_thumbnail(url=BANNER_URL)
     embed.set_image(url=GIF_URL)
+    embed.set_footer(text="Actualizado automáticamente cada segundo ✨")
 
-    msg_id = cargar_id()
-
-    # Si NO hay mensaje guardado → lo crea
-    if msg_id is None:
+    if MENSAJE_ID is None:
         msg = await canal.send(embed=embed)
-        guardar_id(msg.id)
-        print(f"Mensaje creado con ID {msg.id}")
-        return
+        MENSAJE_ID = msg.id
+        print(f"Mensaje creado con ID: {MENSAJE_ID}")
+    else:
+        try:
+            msg = await canal.fetch_message(MENSAJE_ID)
+            await msg.edit(embed=embed)
+        except Exception as e:
+            print(f"Error editando mensaje: {e}")
 
-    # Si SÍ existe mensaje → lo edita
-    try:
-        msg = await canal.fetch_message(msg_id)
-        await msg.edit(embed=embed)
-    except discord.NotFound:
-        # Si se borró el mensaje → crear otro
-        print("Mensaje borrado, creando uno nuevo...")
-        msg = await canal.send(embed=embed)
-        guardar_id(msg.id)
-    except Exception as e:
-        print(f"Error inesperado editando mensaje: {e}")
-
-
+# Ejecutar bot
 bot.run(TOKEN)
+
+# IMPORTANTE: Mantiene vivo el servicio en Render
+import web
