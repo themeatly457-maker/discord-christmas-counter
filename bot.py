@@ -116,7 +116,7 @@ _next_update_ts = 0
 #  Construcción de embeds (estético épico-lumínico)
 # ----------------------------
 def crear_embed_meses(meses, dias, horas, minutos, color, month_phrase):
-    title = "🎅✨ C O N T A D O R   D E   N A V I D A D"
+    title = "🎅✨ C O N T A D O R   D E   N A V I D A D ✨🎅"
     desc = (
         f"📅 **Meses:** **{meses}**\n"
         f"🎁 **Días:** **{dias}**\n"
@@ -130,7 +130,7 @@ def crear_embed_meses(meses, dias, horas, minutos, color, month_phrase):
     return embed
 
 def crear_embed_dias(dias, horas, minutos, color, month_phrase):
-    title = "🎅✨ C O N T A D O R   D E   N A V I D A D"
+    title = "🎅✨ C O N T A D O R   D E   N A V I D A D ✨🎅"
     desc = (
         f"🎁 **Días:** **{dias}**\n"
         f"⏰ **Horas:** **{horas}**\n"
@@ -144,7 +144,7 @@ def crear_embed_dias(dias, horas, minutos, color, month_phrase):
 
 def crear_embed_segundos(segundos, color):
     # Modo épico final (visual grande)
-    title = "🎅💥 ¡Ú L T I M O   M I N U T O   N A V I D A D!"
+    title = "🎅💥 ¡Ú L T I M O   M I N U T O   N A V I D A D! 💥🎅"
     desc = f"⏳ **{segundos} s**"
     embed = discord.Embed(title=title, description=desc, color=color)
     embed.set_thumbnail(url=BANNER_URL)
