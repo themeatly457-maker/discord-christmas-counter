@@ -4,24 +4,46 @@ from discord.ext import tasks, commands
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import itertools
+from aiohttp import web   # 👈 NECESARIO PARA /healthz
 
-# TOKEN desde variable de entorno (Render)
+# ============================
+#  SERVIDOR HEALTHZ (Render)
+# ============================
+
+async def healthcheck(request):
+    return web.Response(text="OK")
+
+app = web.Application()
+app.router.add_get("/healthz", healthcheck)
+
+# Ejecutar el servidor sin bloquear el bot
+async def start_health_server():
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", 10000)
+    await site.start()
+    print("✔ Servidor /healthz activo en puerto 10000")
+
+# ============================
+#  BOT DE DISCORD
+# ============================
+
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = 1446410614246215860
 MENSAJE_ID = None
 
-# Imágenes (tuyas)
-BANNER_URL = "https://i.imgur.com/73E1zoy.png"   # miniatura
-GIF_URL = "https://i.imgur.com/Lc07RWf.gif"      # imagen grande
+# Imágenes
+BANNER_URL = "https://i.imgur.com/73E1zoy.png"
+GIF_URL = "https://i.imgur.com/Lc07RWf.gif"
 
-# Colores para degradado
+# Colores animados
 COLORES = [0xFF0000,0xFF7F00,0xFFFF00,0x00FF00,0x00FFFF,0x0000FF,0x8B00FF]
 ciclo_colores = itertools.cycle(COLORES)
 
-# Zona horaria Medellín / Colombia
+# Zona horaria
 TZ = ZoneInfo("America/Bogota")
 
-# Fecha objetivo
+# Fecha objetivo navidad
 fecha_objetivo = datetime(2025, 12, 25, 0, 0, 0, tzinfo=TZ)
 
 intents = discord.Intents.default()
@@ -37,6 +59,7 @@ def formato(delta):
 @bot.event
 async def on_ready():
     print(f"Conectado como {bot.user}")
+    bot.loop.create_task(start_health_server())  # 👈 inicia servidor /healthz
     contador.start()
 
 @tasks.loop(seconds=1)
@@ -74,7 +97,6 @@ async def contador():
     embed.set_image(url=GIF_URL)
     embed.set_footer(text="Actualizado automáticamente cada segundo ✨")
 
-    # Crear o editar mensaje
     if MENSAJE_ID is None:
         msg = await canal.send(embed=embed)
         MENSAJE_ID = msg.id
@@ -86,4 +108,5 @@ async def contador():
         except Exception as e:
             print(f"Error editando mensaje: {e}")
 
+# Ejecutar bot
 bot.run(TOKEN)
