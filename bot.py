@@ -18,18 +18,21 @@ BANNER_URL = "https://i.imgur.com/73E1zoy.png"
 GIF_URL = "https://i.imgur.com/Lc07RWf.gif"
 
 # colores lumínicos (ciclo)
-COLORES = [0xFF0000, 0xFF7F00, 0xFFFF00, 0x00FF00, 0x00FFFF, 0x0000FF, 0x8B00FF]
+COLORES = [
+    0xFF0000, 0xFF7F00, 0xFFFF00,
+    0x00FF00, 0x00FFFF, 0x0000FF,
+    0x8B00FF
+]
 ciclo_colores = itertools.cycle(COLORES)
 
-# zona horaria Medellín
+# zona horaria
 TZ = ZoneInfo("America/Bogota")
-fecha_objetivo = datetime(2025, 12, 25, 0, 0, 0, tzinfo=TZ)
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ----------------------------
-#  Frases por mes (navideñas)
+#  Frases navideñas por mes
 # ----------------------------
 PHRASES_BY_MONTH = {
     1: "✨ La Navidad se fue… pero su magia aún flota en el aire. ✨🌅",
@@ -47,9 +50,19 @@ PHRASES_BY_MONTH = {
 }
 
 # ----------------------------
-#  Guardar y cargar message id
+#  Próxima Navidad automática
 # ----------------------------
-def guardar_message_id(mid: int):
+def obtener_proxima_navidad(ahora):
+    year = ahora.year
+    navidad = datetime(year, 12, 25, 0, 0, 0, tzinfo=TZ)
+    if ahora >= navidad:
+        navidad = datetime(year + 1, 12, 25, 0, 0, 0, tzinfo=TZ)
+    return navidad
+
+# ----------------------------
+#  Guardar / cargar mensaje
+# ----------------------------
+def guardar_message_id(mid):
     try:
         with open(MESSAGE_FILE, "w") as f:
             f.write(str(mid))
@@ -60,20 +73,18 @@ def cargar_message_id():
     try:
         if os.path.exists(MESSAGE_FILE):
             with open(MESSAGE_FILE, "r") as f:
-                txt = f.read().strip()
-                if txt:
-                    return int(txt)
+                return int(f.read().strip())
     except:
         pass
     return None
 
 # ----------------------------
-#  Formatos
+#  Formato tiempo
 # ----------------------------
-def formato_meses_dias(delta):
+def formato_meses(delta):
     total_dias = delta.days
     meses = total_dias // 30
-    dias = total_dias - meses * 30
+    dias = total_dias % 30
     horas = delta.seconds // 3600
     minutos = (delta.seconds % 3600) // 60
     return meses, dias, horas, minutos
@@ -81,141 +92,133 @@ def formato_meses_dias(delta):
 # ----------------------------
 #  Embeds
 # ----------------------------
-def crear_embed_meses(meses, dias, horas, minutos, color, month_phrase):
-    embed = discord.Embed(
+def embed_meses(meses, dias, horas, minutos, color, frase):
+    e = discord.Embed(
         title="🎅✨ C O N T A D O R   D E   N A V I D A D ✨🎅",
-        description=f"📅 **Meses:** **{meses}**\n🎁 **Días:** **{dias}**\n⏰ **Horas:** **{horas}**\n🔔 **Minutos:** **{minutos}**",
+        description=(
+            f"📅 **Meses:** **{meses}**\n"
+            f"🎁 **Días:** **{dias}**\n"
+            f"⏰ **Horas:** **{horas}**\n"
+            f"🔔 **Minutos:** **{minutos}**"
+        ),
         color=color
     )
-    embed.set_thumbnail(url=BANNER_URL)
-    embed.set_image(url=GIF_URL)
-    embed.set_footer(text=month_phrase)
-    return embed
+    e.set_thumbnail(url=BANNER_URL)
+    e.set_image(url=GIF_URL)
+    e.set_footer(text=frase)
+    return e
 
-def crear_embed_dias(dias, horas, minutos, color, month_phrase):
-    embed = discord.Embed(
+def embed_dias(dias, horas, minutos, color, frase):
+    e = discord.Embed(
         title="🎅✨ C O N T A D O R   D E   N A V I D A D ✨🎅",
-        description=f"🎁 **Días:** **{dias}**\n⏰ **Horas:** **{horas}**\n🔔 **Minutos:** **{minutos}**",
+        description=(
+            f"🎁 **Días:** **{dias}**\n"
+            f"⏰ **Horas:** **{horas}**\n"
+            f"🔔 **Minutos:** **{minutos}**"
+        ),
         color=color
     )
-    embed.set_thumbnail(url=BANNER_URL)
-    embed.set_image(url=GIF_URL)
-    embed.set_footer(text=month_phrase)
-    return embed
+    e.set_thumbnail(url=BANNER_URL)
+    e.set_image(url=GIF_URL)
+    e.set_footer(text=frase)
+    return e
 
-def crear_embed_segundos(segundos, color):
-    embed = discord.Embed(
+def embed_segundos(segundos, color):
+    e = discord.Embed(
         title="🎅💥 ¡Ú L T I M O   M I N U T O   N A V I D A D! 💥🎅",
         description=f"⏳ **{segundos} s**",
         color=color
     )
-    embed.set_thumbnail(url=BANNER_URL)
-    embed.set_image(url=GIF_URL)
-    embed.set_footer(text="✨🎄 ¡Cuenta regresiva final! 🎄✨")
-    return embed
+    e.set_thumbnail(url=BANNER_URL)
+    e.set_image(url=GIF_URL)
+    e.set_footer(text="✨🎄 ¡Cuenta regresiva final! 🎄✨")
+    return e
 
 # ----------------------------
-#  Variables de control
+#  Estado
 # ----------------------------
-ULTIMO_MENSAJE_ID = cargar_message_id()
-_next_update_ts = 0
+MENSAJE_ID = cargar_message_id()
+_next_update = 0
 
 # ----------------------------
 #  Bot listo
 # ----------------------------
 @bot.event
 async def on_ready():
-    print(f"Conectado como {bot.user}")
-    contador_loop.start()
+    print(f"🎄 Conectado como {bot.user}")
+    contador.start()
 
 # ----------------------------
 #  Loop principal
 # ----------------------------
 @tasks.loop(seconds=1)
-async def contador_loop():
-    global ULTIMO_MENSAJE_ID, _next_update_ts
+async def contador():
+    global MENSAJE_ID, _next_update
 
     canal = bot.get_channel(CHANNEL_ID)
-    ahora = datetime.now(TZ)
     if canal is None:
         return
 
+    ahora = datetime.now(TZ)
+    fecha_objetivo = obtener_proxima_navidad(ahora)
     delta = fecha_objetivo - ahora
     total_seconds = int(delta.total_seconds())
 
-    # ------------------
-    #  Navidad llegó
-    # ------------------
+    # 🎄 Navidad llegó
     if total_seconds <= 0:
-        embed = discord.Embed(
+        e = discord.Embed(
             title="🎄 ¡Feliz Navidad! 🎉",
             description="El gran día ha llegado 🎁✨",
             color=0x00FF00
         )
-        embed.set_image(url=GIF_URL)
-        await canal.send(embed=embed)
-        contador_loop.cancel()
+        e.set_image(url=GIF_URL)
+        await canal.send(embed=e)
+        await asyncio.sleep(60)
         return
 
-    # ------------------
-    #  Último minuto (actualiza cada 1s)
-    # ------------------
+    # ⏳ Último minuto (segundos)
     if total_seconds <= 60:
-        color_actual = next(ciclo_colores)
-        embed = crear_embed_segundos(total_seconds, color_actual)
-
-        if ULTIMO_MENSAJE_ID is None:
-            m = await canal.send(embed=embed)
-            ULTIMO_MENSAJE_ID = m.id
-            guardar_message_id(m.id)
-        else:
-            try:
-                m = await canal.fetch_message(ULTIMO_MENSAJE_ID)
-                await m.edit(embed=embed)
-            except:
-                m = await canal.send(embed=embed)
-                ULTIMO_MENSAJE_ID = m.id
-                guardar_message_id(m.id)
+        e = embed_segundos(total_seconds, next(ciclo_colores))
+        try:
+            if MENSAJE_ID:
+                msg = await canal.fetch_message(MENSAJE_ID)
+                await msg.edit(embed=e)
+            else:
+                msg = await canal.send(embed=e)
+                MENSAJE_ID = msg.id
+                guardar_message_id(MENSAJE_ID)
+        except:
+            pass
         return
 
-    # ------------------
-    #  Actualización cada minuto
-    # ------------------
-    now_ts = time.time()
-    if now_ts < _next_update_ts:
+    # 🕰️ Actualizar solo cada minuto
+    now = time.time()
+    if now < _next_update:
         return
+    _next_update = (int(now) // 60 + 1) * 60 + 0.2
 
-    _next_update_ts = (int(now_ts) // 60 + 1) * 60 + 0.2
+    frase = PHRASES_BY_MONTH.get(ahora.month, "")
+    color = next(ciclo_colores)
 
-    meses, dias, horas, minutos = formato_meses_dias(delta)
-    color_actual = next(ciclo_colores)
-    month_phrase = PHRASES_BY_MONTH.get(ahora.month, "")
-
-    # diciembre → sin meses
     if ahora.month == 12:
-        dias_total = delta.days
-        horas_total = delta.seconds // 3600
-        minutos_total = (delta.seconds % 3600) // 60
-        embed = crear_embed_dias(dias_total, horas_total, minutos_total, color_actual, month_phrase)
+        dias = delta.days
+        horas = delta.seconds // 3600
+        minutos = (delta.seconds % 3600) // 60
+        e = embed_dias(dias, horas, minutos, color, frase)
     else:
-        embed = crear_embed_meses(meses, dias, horas, minutos, color_actual, month_phrase)
+        meses, dias, horas, minutos = formato_meses(delta)
+        e = embed_meses(meses, dias, horas, minutos, color, frase)
 
-    # enviar o editar mensaje
     try:
-        if ULTIMO_MENSAJE_ID is None:
-            m = await canal.send(embed=embed)
-            ULTIMO_MENSAJE_ID = m.id
-            guardar_message_id(m.id)
+        if MENSAJE_ID:
+            msg = await canal.fetch_message(MENSAJE_ID)
+            await msg.edit(embed=e)
         else:
-            try:
-                m = await canal.fetch_message(ULTIMO_MENSAJE_ID)
-                await m.edit(embed=embed)
-            except:
-                m = await canal.send(embed=embed)
-                ULTIMO_MENSAJE_ID = m.id
-                guardar_message_id(m.id)
+            msg = await canal.send(embed=e)
+            MENSAJE_ID = msg.id
+            guardar_message_id(MENSAJE_ID)
     except:
-        await asyncio.sleep(1)
+        pass
 
 # ----------------------------
 #  Ejecutar
@@ -223,4 +226,4 @@ async def contador_loop():
 if TOKEN:
     bot.run(TOKEN)
 else:
-    print("ERROR: No hay DISCORD_TOKEN")
+    print("❌ Falta DISCORD_TOKEN")
