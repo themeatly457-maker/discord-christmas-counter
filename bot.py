@@ -2,13 +2,14 @@ import os
 import asyncio
 import calendar
 import discord
+import traceback
 from discord.ext import commands
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import itertools
 
 # ----------------------------
-# Config
+#  Configuración
 # ----------------------------
 TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = 1446410614246215860
@@ -29,7 +30,7 @@ intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ----------------------------
-# Frases por mes
+#  Frases navideñas por mes
 # ----------------------------
 PHRASES_BY_MONTH = {
     1: "✨ La Navidad se fue… pero su magia aún flota en el aire. ✨🌅",
@@ -47,7 +48,7 @@ PHRASES_BY_MONTH = {
 }
 
 # ----------------------------
-# Próxima Navidad automática
+#  Próxima Navidad automática
 # ----------------------------
 def obtener_proxima_navidad(ahora: datetime) -> datetime:
     year = ahora.year
@@ -57,14 +58,18 @@ def obtener_proxima_navidad(ahora: datetime) -> datetime:
     return navidad
 
 # ----------------------------
-# Guardar y cargar message id
+#  Guardar / cargar ID de mensaje (atómico)
 # ----------------------------
 def guardar_message_id(mid: int):
     try:
-        with open(MESSAGE_FILE, "w", encoding="utf-8") as f:
+        temp = MESSAGE_FILE + ".tmp"
+        with open(temp, "w", encoding="utf-8") as f:
             f.write(str(mid))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp, MESSAGE_FILE)
     except Exception as e:
-        print(f"Error guardando message id: {e}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error guardando message_id: {e}")
 
 def cargar_message_id():
     try:
@@ -74,11 +79,11 @@ def cargar_message_id():
                 if txt:
                     return int(txt)
     except Exception as e:
-        print(f"Error cargando message id: {e}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error cargando message_id: {e}")
     return None
 
 # ----------------------------
-# Tiempo exacto por calendario
+#  Cálculos de tiempo (meses / días reales)
 # ----------------------------
 def sumar_meses(fecha: datetime, meses: int) -> datetime:
     mes = fecha.month - 1 + meses
@@ -90,11 +95,9 @@ def sumar_meses(fecha: datetime, meses: int) -> datetime:
 def descomponer_tiempo(ahora: datetime, objetivo: datetime):
     meses = (objetivo.year - ahora.year) * 12 + (objetivo.month - ahora.month)
     candidato = sumar_meses(ahora, meses)
-
     if candidato > objetivo:
         meses -= 1
         candidato = sumar_meses(ahora, meses)
-
     restante = objetivo - candidato
     dias = restante.days
     horas = restante.seconds // 3600
@@ -102,9 +105,9 @@ def descomponer_tiempo(ahora: datetime, objetivo: datetime):
     return meses, dias, horas, minutos
 
 # ----------------------------
-# Embeds
+#  Creación de embeds
 # ----------------------------
-def crear_embed_meses(meses, dias, horas, minutos, color, month_phrase):
+def crear_embed_meses(meses, dias, horas, minutos, color, frase):
     embed = discord.Embed(
         title="🎅✨ C O N T A D O R   D E   N A V I D A D ✨🎅",
         description=(
@@ -117,10 +120,10 @@ def crear_embed_meses(meses, dias, horas, minutos, color, month_phrase):
     )
     embed.set_thumbnail(url=BANNER_URL)
     embed.set_image(url=GIF_URL)
-    embed.set_footer(text=month_phrase)
+    embed.set_footer(text=frase)
     return embed
 
-def crear_embed_dias(dias, horas, minutos, color, month_phrase):
+def crear_embed_dias(dias, horas, minutos, color, frase):
     embed = discord.Embed(
         title="🎅✨ C O N T A D O R   D E   N A V I D A D ✨🎅",
         description=(
@@ -132,17 +135,17 @@ def crear_embed_dias(dias, horas, minutos, color, month_phrase):
     )
     embed.set_thumbnail(url=BANNER_URL)
     embed.set_image(url=GIF_URL)
-    embed.set_footer(text=month_phrase)
+    embed.set_footer(text=frase)
     return embed
 
 # ----------------------------
-# Estado
+#  Variables de estado
 # ----------------------------
 MENSAJE_ID = cargar_message_id()
 contador_task = None
 
 # ----------------------------
-# Helpers
+#  Funciones auxiliares
 # ----------------------------
 async def obtener_canal():
     canal = bot.get_channel(CHANNEL_ID)
@@ -151,19 +154,17 @@ async def obtener_canal():
     try:
         return await bot.fetch_channel(CHANNEL_ID)
     except Exception as e:
-        print(f"Error obteniendo canal: {e}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error obteniendo canal: {e}")
         return None
 
 async def enviar_o_actualizar(canal, embed):
     global MENSAJE_ID
-
     if MENSAJE_ID is None:
         msg = await canal.send(embed=embed)
         MENSAJE_ID = msg.id
         guardar_message_id(MENSAJE_ID)
-        print(f"Mensaje creado con ID: {MENSAJE_ID}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Mensaje creado con ID: {MENSAJE_ID}")
         return
-
     try:
         msg = await canal.fetch_message(MENSAJE_ID)
         await msg.edit(embed=embed)
@@ -171,8 +172,11 @@ async def enviar_o_actualizar(canal, embed):
         msg = await canal.send(embed=embed)
         MENSAJE_ID = msg.id
         guardar_message_id(MENSAJE_ID)
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Mensaje recreado con ID: {MENSAJE_ID}")
+    except discord.Forbidden:
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error: permisos insuficientes para editar el mensaje.")
     except Exception as e:
-        print(f"Error editando mensaje: {e}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error editando/enviando mensaje: {e}")
 
 async def dormir_hasta_siguiente_minuto():
     ahora = datetime.now(TZ)
@@ -183,18 +187,24 @@ async def dormir_hasta_siguiente_minuto():
     await asyncio.sleep(delay)
 
 # ----------------------------
-# Bot listo
+#  Eventos del bot
 # ----------------------------
 @bot.event
 async def on_ready():
     global contador_task
-    print(f"Conectado como {bot.user}")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Conectado como {bot.user}")
+    if contador_task is None or contador_task.done():
+        contador_task = asyncio.create_task(contador())
 
+@bot.event
+async def on_resumed():
+    global contador_task
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Sesión reanudada en Discord.")
     if contador_task is None or contador_task.done():
         contador_task = asyncio.create_task(contador())
 
 # ----------------------------
-# Loop principal
+#  Loop principal de conteo
 # ----------------------------
 async def contador():
     while not bot.is_closed():
@@ -206,15 +216,13 @@ async def contador():
 
             ahora = datetime.now(TZ)
             objetivo = obtener_proxima_navidad(ahora)
-            delta = objetivo - ahora
-
             frase = PHRASES_BY_MONTH.get(ahora.month, "")
             color = next(ciclo_colores)
 
             if ahora.month == 12:
-                dias = delta.days
-                horas = delta.seconds // 3600
-                minutos = (delta.seconds % 3600) // 60
+                dias = (objetivo - ahora).days
+                horas = (objetivo - ahora).seconds // 3600
+                minutos = ((objetivo - ahora).seconds % 3600) // 60
                 embed = crear_embed_dias(dias, horas, minutos, color, frase)
             else:
                 meses, dias, horas, minutos = descomponer_tiempo(ahora, objetivo)
@@ -223,14 +231,17 @@ async def contador():
             await enviar_o_actualizar(canal, embed)
             await dormir_hasta_siguiente_minuto()
 
+        except asyncio.CancelledError:
+            raise  # permitir cancelación de la tarea si ocurre
         except Exception as e:
-            print(f"Error en contador: {e}")
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error en contador: {e}")
+            traceback.print_exc()
             await asyncio.sleep(10)
 
 # ----------------------------
-# Ejecutar
+#  Ejecutar bot
 # ----------------------------
 if TOKEN:
     bot.run(TOKEN)
 else:
-    print("ERROR: No hay DISCORD_TOKEN")
+    print("ERROR: Falta la variable DISCORD_TOKEN")
