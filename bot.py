@@ -1,7 +1,9 @@
 import os
+import asyncio
+import calendar
 import discord
-from discord.ext import tasks, commands
-from datetime import datetime
+from discord.ext import commands
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import itertools
 
@@ -76,14 +78,27 @@ def cargar_message_id():
     return None
 
 # ----------------------------
-# Formatos
+# Tiempo exacto por calendario
 # ----------------------------
-def formato_meses(delta):
-    total_dias = delta.days
-    meses = total_dias // 30
-    dias = total_dias % 30
-    horas = delta.seconds // 3600
-    minutos = (delta.seconds % 3600) // 60
+def sumar_meses(fecha: datetime, meses: int) -> datetime:
+    mes = fecha.month - 1 + meses
+    year = fecha.year + mes // 12
+    mes = mes % 12 + 1
+    dia = min(fecha.day, calendar.monthrange(year, mes)[1])
+    return fecha.replace(year=year, month=mes, day=dia)
+
+def descomponer_tiempo(ahora: datetime, objetivo: datetime):
+    meses = (objetivo.year - ahora.year) * 12 + (objetivo.month - ahora.month)
+    candidato = sumar_meses(ahora, meses)
+
+    if candidato > objetivo:
+        meses -= 1
+        candidato = sumar_meses(ahora, meses)
+
+    restante = objetivo - candidato
+    dias = restante.days
+    horas = restante.seconds // 3600
+    minutos = (restante.seconds % 3600) // 60
     return meses, dias, horas, minutos
 
 # ----------------------------
@@ -124,16 +139,7 @@ def crear_embed_dias(dias, horas, minutos, color, month_phrase):
 # Estado
 # ----------------------------
 MENSAJE_ID = cargar_message_id()
-_next_update = 0
-
-# ----------------------------
-# Bot listo
-# ----------------------------
-@bot.event
-async def on_ready():
-    print(f"Conectado como {bot.user}")
-    if not contador.is_running():
-        contador.start()
+contador_task = None
 
 # ----------------------------
 # Helpers
@@ -143,69 +149,83 @@ async def obtener_canal():
     if canal is not None:
         return canal
     try:
-        canal = await bot.fetch_channel(CHANNEL_ID)
-        return canal
+        return await bot.fetch_channel(CHANNEL_ID)
     except Exception as e:
         print(f"Error obteniendo canal: {e}")
         return None
 
+async def enviar_o_actualizar(canal, embed):
+    global MENSAJE_ID
+
+    if MENSAJE_ID is None:
+        msg = await canal.send(embed=embed)
+        MENSAJE_ID = msg.id
+        guardar_message_id(MENSAJE_ID)
+        print(f"Mensaje creado con ID: {MENSAJE_ID}")
+        return
+
+    try:
+        msg = await canal.fetch_message(MENSAJE_ID)
+        await msg.edit(embed=embed)
+    except discord.NotFound:
+        msg = await canal.send(embed=embed)
+        MENSAJE_ID = msg.id
+        guardar_message_id(MENSAJE_ID)
+    except Exception as e:
+        print(f"Error editando mensaje: {e}")
+
+async def dormir_hasta_siguiente_minuto():
+    ahora = datetime.now(TZ)
+    siguiente = ahora.replace(second=0, microsecond=0) + timedelta(minutes=1)
+    delay = (siguiente - ahora).total_seconds()
+    if delay < 0.05:
+        delay = 0.05
+    await asyncio.sleep(delay)
+
+# ----------------------------
+# Bot listo
+# ----------------------------
+@bot.event
+async def on_ready():
+    global contador_task
+    print(f"Conectado como {bot.user}")
+
+    if contador_task is None or contador_task.done():
+        contador_task = asyncio.create_task(contador())
+
 # ----------------------------
 # Loop principal
 # ----------------------------
-@tasks.loop(minutes=1)
 async def contador():
-    global MENSAJE_ID, _next_update
+    while not bot.is_closed():
+        try:
+            canal = await obtener_canal()
+            if canal is None:
+                await asyncio.sleep(30)
+                continue
 
-    try:
-        canal = await obtener_canal()
-        if canal is None:
-            return
+            ahora = datetime.now(TZ)
+            objetivo = obtener_proxima_navidad(ahora)
+            delta = objetivo - ahora
 
-        ahora = datetime.now(TZ)
-        fecha_objetivo = obtener_proxima_navidad(ahora)
-        delta = fecha_objetivo - ahora
+            frase = PHRASES_BY_MONTH.get(ahora.month, "")
+            color = next(ciclo_colores)
 
-        total_seconds = int(delta.total_seconds())
-        if total_seconds <= 0:
-            embed = discord.Embed(
-                title="🎄 ¡Feliz Navidad! 🎉",
-                description="El gran día ha llegado 🎁✨",
-                color=0x00FF00
-            )
-            embed.set_image(url=GIF_URL)
-            await canal.send(embed=embed)
-            return
+            if ahora.month == 12:
+                dias = delta.days
+                horas = delta.seconds // 3600
+                minutos = (delta.seconds % 3600) // 60
+                embed = crear_embed_dias(dias, horas, minutos, color, frase)
+            else:
+                meses, dias, horas, minutos = descomponer_tiempo(ahora, objetivo)
+                embed = crear_embed_meses(meses, dias, horas, minutos, color, frase)
 
-        frase = PHRASES_BY_MONTH.get(ahora.month, "")
-        color = next(ciclo_colores)
+            await enviar_o_actualizar(canal, embed)
+            await dormir_hasta_siguiente_minuto()
 
-        if ahora.month == 12:
-            dias = delta.days
-            horas = delta.seconds // 3600
-            minutos = (delta.seconds % 3600) // 60
-            embed = crear_embed_dias(dias, horas, minutos, color, frase)
-        else:
-            meses, dias, horas, minutos = formato_meses(delta)
-            embed = crear_embed_meses(meses, dias, horas, minutos, color, frase)
-
-        if MENSAJE_ID is None:
-            msg = await canal.send(embed=embed)
-            MENSAJE_ID = msg.id
-            guardar_message_id(MENSAJE_ID)
-            print(f"Mensaje creado con ID: {MENSAJE_ID}")
-        else:
-            try:
-                msg = await canal.fetch_message(MENSAJE_ID)
-                await msg.edit(embed=embed)
-            except discord.NotFound:
-                msg = await canal.send(embed=embed)
-                MENSAJE_ID = msg.id
-                guardar_message_id(MENSAJE_ID)
-            except Exception as e:
-                print(f"Error editando mensaje: {e}")
-
-    except Exception as e:
-        print(f"Error en contador: {e}")
+        except Exception as e:
+            print(f"Error en contador: {e}")
+            await asyncio.sleep(10)
 
 # ----------------------------
 # Ejecutar
