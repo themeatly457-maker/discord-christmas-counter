@@ -5,10 +5,12 @@ import subprocess
 
 app = Flask(__name__)
 
-# Iniciar el bot en otro hilo/proceso para no bloquear Flask
+bot_process = None
+
 def run_bot():
-    # Ejecuta bot.py en un subproceso separado
-    subprocess.Popen(["python", "bot.py"])
+    global bot_process
+    if bot_process is None:
+        bot_process = subprocess.Popen(["python", "bot.py"])
 
 threading.Thread(target=run_bot, daemon=True).start()
 
@@ -22,5 +24,4 @@ def ping():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    # Host 0.0.0.0 para que Render lo exponga externamente
     app.run(host="0.0.0.0", port=port)
