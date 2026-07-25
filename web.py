@@ -1,24 +1,51 @@
+# web.py
 import os
-import threading
+import logging
+import signal
+from threading import Thread
 from flask import Flask
+from bot import BotRunner  # asumimos que implementamos BotRunner en bot.py
 
-# Ejecuta el bot en un hilo aparte
-def run_bot():
-    # Lanza bot.py como un proceso separado
-    os.system("python bot.py")
+# Configuración de logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 
-threading.Thread(target=run_bot, daemon=True).start()
-
+# Crear app Flask para health-check
 app = Flask(__name__)
 
 @app.route("/")
-def home():
-    return "Bot de Navidad activo."
-
 @app.route("/ping")
 def ping():
-    return "OK"
+    return "OK", 200
+
+def run_flask():
+    port = int(os.getenv("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+def shutdown_server():
+    # Esta función intenta detener Flask (solo en ciertos servidores)
+    func = os.getenv('WERKZEUG_SERVER.shutdown')
+    if func:
+        func()
+
+def handle_sigterm(signum, frame):
+    logging.info("SIGTERM recibido: apagando bot y servidor.")
+    # Llamar a cierre limpio en BotRunner
+    BotRunner.stop()  # definiremos esto para cerrar el bot
+    shutdown_server()
+    os._exit(0)
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    # Registrar handler SIGTERM para apagado limpio
+    signal.signal(signal.SIGTERM, handle_sigterm)
+
+    # Iniciar servidor Flask en un hilo
+    flask_thread = Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logging.info("Servidor Flask iniciado para health checks.")
+
+    # Iniciar el bot
+    try:
+        BotRunner.start()  # Métodos estáticos para arrancar el bot
+    except Exception as e:
+        logging.error(f"Error al iniciar el bot: {e}")
+        raise
