@@ -1,15 +1,16 @@
 import asyncio
+import itertools
 import json
 import os
 import sys
 import time
-import itertools
-from pathlib import Path
+import traceback
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import discord
-from discord.ext import commands
 from dateutil.relativedelta import relativedelta
+from discord.ext import commands
 from filelock import FileLock
 from zoneinfo import ZoneInfo
 
@@ -78,8 +79,10 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 COUNTER_MESSAGE_ID: int | None = None
 LAST_TICK_TS: float = 0.0
+
 counter_task: asyncio.Task | None = None
 watchdog_task: asyncio.Task | None = None
+supervisor_task: asyncio.Task | None = None
 
 
 def atomic_write_text(path: Path, content: str, lock: FileLock) -> None:
@@ -95,7 +98,7 @@ def load_state() -> dict:
             if STATE_FILE.exists():
                 return json.loads(STATE_FILE.read_text(encoding="utf-8"))
     except Exception as e:
-        print(f"Error cargando state.json: {e}")
+        print(f"Error cargando counter_state.json: {e}")
 
     try:
         if LEGACY_MESSAGE_FILE.exists():
@@ -133,7 +136,7 @@ def save_state(
             STATE_LOCK,
         )
     except Exception as e:
-        print(f"Error guardando state.json: {e}")
+        print(f"Error guardando counter_state.json: {e}")
 
     if message_id is not None:
         try:
@@ -144,6 +147,7 @@ def save_state(
 
 state = load_state()
 COUNTER_MESSAGE_ID = state.get("message_id")
+
 try:
     LAST_TICK_TS = float(state.get("last_tick_ts", 0.0) or 0.0)
 except Exception:
@@ -374,6 +378,7 @@ async def counter_worker():
             raise
         except Exception as exc:
             print(f"[counter] error: {exc!r}")
+            traceback.print_exc()
             LAST_TICK_TS = time.time()
             save_state(
                 status="error",
@@ -396,20 +401,68 @@ async def watchdog_worker():
         stale_for = time.time() - LAST_TICK_TS
         if stale_for > 900:
             print(f"[watchdog] contador detenido hace {stale_for:.0f}s. Reiniciando proceso.")
+            save_state(
+                status="error",
+                detail=f"watchdog_stale_{stale_for:.0f}s",
+                message_id=COUNTER_MESSAGE_ID,
+                last_tick_ts=time.time(),
+            )
             os._exit(1)
+
+
+async def supervisor_worker():
+    global counter_task, watchdog_task
+
+    await bot.wait_until_ready()
+
+    while not bot.is_closed():
+        try:
+            if counter_task is None or counter_task.done():
+                if counter_task is not None:
+                    try:
+                        exc = counter_task.exception()
+                        if exc:
+                            print(f"[supervisor] counter_task terminó con error: {exc!r}")
+                    except Exception:
+                        pass
+                counter_task = asyncio.create_task(counter_worker())
+                print("[supervisor] counter_task reiniciada.")
+
+            if watchdog_task is None or watchdog_task.done():
+                if watchdog_task is not None:
+                    try:
+                        exc = watchdog_task.exception()
+                        if exc:
+                            print(f"[supervisor] watchdog_task terminó con error: {exc!r}")
+                    except Exception:
+                        pass
+                watchdog_task = asyncio.create_task(watchdog_worker())
+                print("[supervisor] watchdog_task reiniciada.")
+
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[supervisor] error: {exc!r}")
+            traceback.print_exc()
+            await asyncio.sleep(10)
 
 
 @bot.event
 async def on_ready():
-    global counter_task, watchdog_task
+    global supervisor_task
 
     print(f"✅ Conectado como {bot.user}")
+    save_state(
+        status="connected",
+        detail="bot_ready",
+        message_id=COUNTER_MESSAGE_ID,
+        last_tick_ts=time.time(),
+    )
 
-    if counter_task is None or counter_task.done():
-        counter_task = asyncio.create_task(counter_worker())
-
-    if watchdog_task is None or watchdog_task.done():
-        watchdog_task = asyncio.create_task(watchdog_worker())
+    if supervisor_task is None or supervisor_task.done():
+        supervisor_task = asyncio.create_task(supervisor_worker())
+        print("[on_ready] supervisor_task iniciada.")
 
 
 @bot.event
@@ -425,10 +478,8 @@ async def on_resumed():
 @bot.event
 async def on_error(event, *args, **kwargs):
     print(f"❌ Error en evento '{event}':", file=sys.stderr)
+    traceback.print_exc()
 
-
-counter_task: asyncio.Task | None = None
-watchdog_task: asyncio.Task | None = None
 
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN, reconnect=True)
