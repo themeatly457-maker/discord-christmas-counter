@@ -1,5 +1,5 @@
-discord.py
-python-dotenv
-aiohttp
-Flask
-
+discord.py==2.5.2
+Flask==3.1.2
+python-dotenv==1.1.1
+aiohttp==3.12.15
+python-dateutil==2.9.0.post0
