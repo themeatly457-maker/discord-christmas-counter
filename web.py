@@ -1,5 +1,4 @@
 from flask import Flask
-import json
 import os
 import signal
 import subprocess
@@ -9,7 +8,6 @@ import time
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
-STATE_FILE = BASE_DIR / "counter_state.json"
 
 app = Flask(__name__)
 
@@ -78,21 +76,13 @@ def stop_bot() -> None:
         print("Bot detenido.")
 
 
-def heartbeat_age_seconds() -> float | None:
-    try:
-        if not STATE_FILE.exists():
-            return None
-        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        ts = float(data.get("last_tick_ts", 0))
-        if ts <= 0:
-            return None
-        return time.time() - ts
-    except Exception:
-        return None
-
-
 def monitor_bot() -> None:
+    from json import loads
+
+    state_file = BASE_DIR / "counter_state.json"
+
     start_bot()
+
     while True:
         time.sleep(30)
 
@@ -105,7 +95,17 @@ def monitor_bot() -> None:
             start_bot()
             continue
 
-        age = heartbeat_age_seconds()
+        # Heartbeat del bot
+        age = None
+        try:
+            if state_file.exists():
+                data = loads(state_file.read_text(encoding="utf-8"))
+                ts = float(data.get("last_tick_ts", 0) or 0)
+                if ts > 0:
+                    age = time.time() - ts
+        except Exception:
+            age = None
+
         if age is None:
             if time.time() - bot_started_at > 900:
                 print("Aún no hay heartbeat válido. Reiniciando bot...")
